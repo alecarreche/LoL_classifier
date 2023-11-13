@@ -39,6 +39,6 @@ if __name__ == '__main__':
             con=engine,
             if_exists='replace',
             index=True,
-            index_label='champion_id',
+            index_label='championid',
             method='multi'
         )
