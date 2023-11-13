@@ -164,7 +164,14 @@ if __name__ == '__main__':
 
             # get match info (1 request)
             match_df = get_match_data(m)
+
+            # get mastery info (10 requests)
+            for puuid, cid in match_df[['puuid', 'championid']].values:
+                mastery_dict = get_champion_mastery(puuid, cid)
             
+                # upload to mastery table
+                upload_champion_mastery(mastery_dict, conn)
+
             # upload required match data
             match_df.to_sql(
                 name='fct_matches',
@@ -173,13 +180,6 @@ if __name__ == '__main__':
                 index=False,
                 method='multi'
             )
-
-            # get mastery info (10 requests)
-            for puuid, cid in match_df[['puuid', 'championid']].values:
-                mastery_dict = get_champion_mastery(puuid, cid)
-            
-                # upload to mastery table
-                upload_champion_mastery(mastery_dict, conn)
 
             # get matches from players (10 requests)
             for puuid in match_df['puuid'].values:
