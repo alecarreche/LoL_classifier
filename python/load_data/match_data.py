@@ -68,6 +68,15 @@ def upload_match_ids_to_queue(match_ids, conn):
     for m in match_ids:
         sql = f"""INSERT INTO matchID_queue (matchid) VALUES ('{m}') ON CONFLICT DO NOTHING;"""
         cursor.execute(sql)
+
+    # cleanup incase existing matchids were added to queue
+    sql = f"""
+        DELETE FROM matchid_queue mq 
+        WHERE mq.matchid IN (
+            SELECT matchid FROM fct_matches fm
+        );
+    """
+    cursor.execute(sql)
     conn.commit()
     cursor.close()
 
@@ -131,8 +140,8 @@ def matches_in_queue(conn):
 
 def batch_query(conn):
     cursor = conn.cursor()
-    cursor.execute('SELECT matchid FROM matchid_queue ORDER BY RANDOM() LIMIT 4;')
-    batch = cursor.fetchall()[0]
+    cursor.execute('SELECT matchid FROM matchid_queue ORDER BY RANDOM() LIMIT 8;')
+    batch = [r[0] for r in cursor.fetchall()]
     cursor.close()
 
     return batch
@@ -153,6 +162,8 @@ if __name__ == '__main__':
         logging.info('Match queue empty. Regnerating from root nodes.')
         load_matches_from_root_nodes(conn)
 
+    global_start = time.time()
+
     while True:
         logging.info('Beginning batch')
         start = time.time()
@@ -167,32 +178,37 @@ if __name__ == '__main__':
 
             # get mastery info (10 requests)
             for puuid, cid in match_df[['puuid', 'championid']].values:
-                mastery_dict = get_champion_mastery(puuid, cid)
-            
-                # upload to mastery table
-                upload_champion_mastery(mastery_dict, conn)
+                try:
+                    mastery_dict = get_champion_mastery(puuid, cid)
+                
+                    # upload to mastery table
+                    upload_champion_mastery(mastery_dict, conn)
+                except Exception:
+                    continue
 
             # upload required match data
-            match_df.to_sql(
-                name='fct_matches',
-                con=engine,
-                if_exists='append',
-                index=False,
-                method='multi'
-            )
+            try:
+                match_df.to_sql(
+                    name='fct_matches',
+                    con=engine,
+                    if_exists='append',
+                    index=False,
+                    method='multi'
+                )
 
-            # get matches from players (10 requests)
-            for puuid in match_df['puuid'].values:
-                # get matches from puuid
-                match_ids = get_match_ids(puuid)
+            except Exception:
+                pass
 
-                # add to match id queue
-                upload_match_ids_to_queue(match_ids, conn)
+            # # get matches from players (10 requests)
+            # for puuid in match_df['puuid'].values:
+            #     # get matches from puuid
+            #     match_ids = get_match_ids(puuid)
+
+            #     # add to match id queue
+            #     upload_match_ids_to_queue(match_ids, conn)
 
             # remove match id from queue
             delete_match_id_from_queue(m, conn)
-
-            break
 
         logging.info('Completed batch')
         elapsed = time.time() - start
@@ -201,6 +217,8 @@ if __name__ == '__main__':
             logging.info(f'Sleeping for {120 - elapsed} seconds to avoid rate limits')
             time.sleep(120 - elapsed)
 
-        break
+        # # kill after ~3 hours
+        # if time.time() - global_start > 10000:
+        #     break
 
     conn.close()
